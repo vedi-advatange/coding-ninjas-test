@@ -8,17 +8,21 @@ class AppExt
     public function __construct()
     {
         add_action('init', array($this, 'onInit'));
-        add_filter('enter_title_here', array($this, 'filterEnterTitle'));
         add_action('save_post_task', array($this, 'onSaveTask'));
-        add_filter('document_title_parts', array($this, 'filterTitle'));
-        add_shortcode('cn_dashboard', array($this, 'shortcodeDashboard'));
-        add_filter('cn_tasks_thead_cols', array($this, 'filterTasksHeadCols'));
-        add_filter('cn_tasks_tbody_row_cols', array($this, 'filterTasksRowCols'), 10, 2);
         add_action('wp_enqueue_scripts', array($this, 'onEnqueueScripts'), 22);
-        add_filter('cn_menu', array($this, 'filterMenu'), 10, 2);
-        add_action('cn_after_tasks_table', array($this, 'onAfterTasksTable'));
         add_action('wp_ajax_add_task', array($this, 'onAddTask'));
         add_action('wp_ajax_nopriv_add_task', array($this, 'onAddTaskNopriv'));
+        add_action('cn_after_tasks_table', array($this, 'onAfterTasksTable'));
+        add_action('do_meta_boxes', array(&$this, 'onChangeMetaboxes'));
+
+        add_filter('admin_post_thumbnail_html', array(&$this, 'filterPostThumbnail'));
+        add_filter('enter_title_here', array($this, 'filterEnterTitle'));
+        add_filter('document_title_parts', array($this, 'filterTitle'));
+        add_filter('cn_tasks_thead_cols', array($this, 'filterTasksHeadCols'));
+        add_filter('cn_tasks_tbody_row_cols', array($this, 'filterTasksRowCols'), 10, 2);
+        add_filter('cn_menu', array($this, 'filterMenu'), 10, 2);
+
+        add_shortcode('cn_dashboard', array($this, 'shortcodeDashboard'));
     }
 
     static function run()
@@ -31,56 +35,31 @@ class AppExt
         return self::$instance;
     }
 
-    function onAddTask()
+    static function onActivate()
     {
-        check_ajax_referer();
-        $title = isset($_POST['task_title']) ? $_POST['task_title'] : '';
-        $freelancerID = $_POST['freelancer'] ? $_POST['freelancer'] : '';
-        if ($title != '') {
-            $task = [
-                'post_title' => $title,
-                'post_type' => 'task',
-                'post_status' => 'publish',
-            ];
-            $pid = wp_insert_post($task);
-            if($pid) {
-                if($freelancerID)
-                {
-                    update_post_meta($pid, 'freelancer', $freelancerID);
-                }
-                die(json_encode(['success'=> 1, 'message' => __('Success!')]));
-            }
-            else {
-                die(json_encode(['success'=> 0, 'message'=> __('Error saving Task')]));
-            }
-
-        } else
-        {
-            die(json_encode(['success'=> 0, 'message'=> __('Please set Task title')]));
+        if (!class_exists('codingninjas\App')) {
+            deactivate_plugins(plugin_basename(__FILE__));
+            die('<p style="font-family: -apple-system,BlinkMacSystemFont,Roboto,Oxygen-Sans,Ubuntu,Cantarell,sans-serif;font-size: 13px;">This plugin depends on Coding Ninjas plugin. Please activate Coding Ninjas plugin first.</p>');
         }
     }
 
-    function onAddTaskNopriv()
+    function onInit()
     {
-        die(json_encode(['success'=> 0, 'message'=> __('Please login to add Tasks')]));
+        $this->CreatePostType();
     }
 
-    function filterMenu($menu, $route)
+    function onSaveTask($postID)
     {
-        if ($route == 'tasks') {
-            $menu['/add-task'] = [
-                'title' => 'Add New Task',
-                'icon' => 'fa-plus-circle',
-                'url' => '#add-task'
-            ];
+        if (isset($_POST['task_meta_freelancer'])) {
+            $freelancerID = $_POST['task_meta_freelancer'];
+
+            // validate ID. Numerics are safe to put into meta.
+            if (is_numeric($freelancerID)) {
+                update_post_meta($postID, 'freelancer', $freelancerID);
+            } else {
+                delete_post_meta($postID, 'freelancer');
+            }
         }
-        return $menu;
-    }
-
-    function filterTasksHeadCols($cols)
-    {
-        array_splice($cols, 2, 0, __('Freelancer', 'cn'));
-        return $cols;
     }
 
     function onEnqueueScripts()
@@ -108,63 +87,40 @@ class AppExt
 
     }
 
-    function filterTasksRowCols($cols, $task)
+    function onAddTask()
     {
-        $freelancerId = get_post_meta(ltrim($task->id(), '#'), 'freelancer', true);
+        check_ajax_referer();
+        $title = isset($_POST['task_title']) ? $_POST['task_title'] : '';
+        $freelancerID = $_POST['freelancer'] ? $_POST['freelancer'] : '';
+        if ($title != '') {
+            $task = [
+                'post_title' => $title,
+                'post_type' => 'task',
+                'post_status' => 'publish',
+            ];
+            $pid = wp_insert_post($task);
+            if ($pid) {
+                if ($freelancerID) {
+                    update_post_meta($pid, 'freelancer', $freelancerID);
+                }
+                die(json_encode(['success' => 1, 'message' => __('Success!')]));
+            } else {
+                die(json_encode(['success' => 0, 'message' => __('Error saving Task')]));
+            }
 
-        array_splice($cols, 2, 0, [$freelancerId ? get_the_title($freelancerId) : '']);
-        return $cols;
+        } else {
+            die(json_encode(['success' => 0, 'message' => __('Please set Task title')]));
+        }
     }
 
-    function shortcodeDashboard()
+    function onAddTaskNopriv()
     {
-        $freelancerCount = wp_count_posts('freelancer')->publish;
-        $taskCount = wp_count_posts('task')->publish;
-
-        ob_start();
-        ?>
-        <div class="row">
-            <div class="col-lg-3 col-md-6">
-                <div class="panel panel-primary">
-                    <div class="panel-heading">
-                        <div class="row">
-                            <div class="col-xs-3">
-                                <i class="fa fa-users fa-5x"></i>
-                            </div>
-                            <div class="col-xs-9 text-right">
-                                <div class="huge"><?= $freelancerCount ?></div>
-                                <div><?= _n('Freelancer', 'Freelancers', $freelancerCount, 'cn') ?></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-3 col-md-6">
-                <a href="<?= site_url() ?>/tasks">
-                    <div class="panel panel-green">
-                        <div class="panel-heading">
-                            <div class="row">
-                                <div class="col-xs-3">
-                                    <i class="fa fa-tasks fa-5x"></i>
-                                </div>
-                                <div class="col-xs-9 text-right">
-                                    <div class="huge"><?= $taskCount ?></div>
-                                    <div><?= _n('Task', 'Tasks', $taskCount, 'cn') ?></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
+        die(json_encode(['success' => 0, 'message' => __('Please login to add Tasks')]));
     }
 
     function onAfterTasksTable($page)
     {
         ?>
-        <!-- Modal -->
         <div class="modal fade" id="addTask" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
             <div class="modal-dialog" role="document">
                 <div class="modal-content">
@@ -223,18 +179,22 @@ class AppExt
         <?php
     }
 
-    function filterTitle($in)
+    function onChangeMetaboxes()
     {
-        switch (App::$route) {
-            case 'dashboard':
-                $in['title'] = "Dashboard";
-                break;
-            case 'tasks':
-                $in['title'] = "Tasks";
-                break;
-
+        if ('freelancer' === get_post_type()) {
+            remove_meta_box('postimagediv', 'freelancer', 'side');
+            add_meta_box('postimagediv', __('Avatar', 'cn'), 'post_thumbnail_meta_box', 'freelancer', 'side');
+        } elseif ('task' === get_post_type()) {
+            add_meta_box('freelancerdiv', __('Freelancer', 'cn'), array(&self::$instance, 'task_freelancer_meta_box'), 'task', 'side');
         }
+    }
 
+    function filterPostThumbnail($in)
+    {
+        if ('freelancer' === get_post_type()) {
+            $in = str_replace('Set featured image', __('Set Avatar', 'cn'), $in);
+            $in = str_replace('Remove featured image', __('Remove Avatar', 'cn'), $in);
+        }
         return $in;
     }
 
@@ -247,29 +207,43 @@ class AppExt
         return $in;
     }
 
-    static function onActivate()
+    function filterTitle($in)
     {
-        if (!class_exists('codingninjas\App')) {
-            deactivate_plugins(plugin_basename(__FILE__));
-            die('<p style="font-family: -apple-system,BlinkMacSystemFont,Roboto,Oxygen-Sans,Ubuntu,Cantarell,sans-serif;font-size: 13px;">This plugin depends on Coding Ninjas plugin. Please activate Coding Ninjas plugin first.</p>');
+        switch (App::$route) {
+            case 'dashboard':
+                $in['title'] = "Dashboard";
+                break;
+            case 'tasks':
+                $in['title'] = "Tasks";
+                break;
         }
+
+        return $in;
     }
 
-    function onInit()
+    function filterTasksHeadCols($cols)
     {
-        $this->CreatePostType();
-        add_action('do_meta_boxes', array(&$this, 'onChangeMetaboxes'));
-        add_filter('admin_post_thumbnail_html', array(&$this, 'filterPostThumbnail'));
+        array_splice($cols, 2, 0, __('Freelancer', 'cn'));
+        return $cols;
     }
 
-    function onChangeMetaboxes()
+    function filterTasksRowCols($cols, $task)
     {
-        if ('freelancer' === get_post_type()) {
-            remove_meta_box('postimagediv', 'freelancer', 'side');
-            add_meta_box('postimagediv', __('Avatar', 'cn'), 'post_thumbnail_meta_box', 'freelancer', 'side');
-        } elseif ('task' === get_post_type()) {
-            add_meta_box('freelancerdiv', __('Freelancer', 'cn'), array(&self::$instance, 'task_freelancer_meta_box'), 'task', 'side');
+        $freelancerId = get_post_meta(ltrim($task->id(), '#'), 'freelancer', true);
+        array_splice($cols, 2, 0, [$freelancerId ? get_the_title($freelancerId) : '']);
+        return $cols;
+    }
+
+    function filterMenu($menu, $route)
+    {
+        if ($route == 'tasks') {
+            $menu['/add-task'] = [
+                'title' => 'Add New Task',
+                'icon' => 'fa-plus-circle',
+                'url' => '#add-task'
+            ];
         }
+        return $menu;
     }
 
     function task_freelancer_meta_box($post)
@@ -290,27 +264,49 @@ class AppExt
         <?php
     }
 
-    function onSaveTask($postID)
+    function shortcodeDashboard()
     {
-        if (isset($_POST['task_meta_freelancer'])) {
-            $freelancerID = $_POST['task_meta_freelancer'];
+        $freelancerCount = wp_count_posts('freelancer')->publish;
+        $taskCount = wp_count_posts('task')->publish;
 
-            // validate ID. Numerics are safe to put into meta.
-            if (is_numeric($freelancerID)) {
-                update_post_meta($postID, 'freelancer', $freelancerID);
-            } else {
-                delete_post_meta($postID, 'freelancer');
-            }
-        }
-    }
-
-    function filterPostThumbnail($in)
-    {
-        if ('freelancer' === get_post_type()) {
-            $in = str_replace('Set featured image', __('Set Avatar', 'cn'), $in);
-            $in = str_replace('Remove featured image', __('Remove Avatar', 'cn'), $in);
-        }
-        return $in;
+        ob_start();
+        ?>
+        <div class="row">
+            <div class="col-lg-3 col-md-6">
+                <div class="panel panel-primary">
+                    <div class="panel-heading">
+                        <div class="row">
+                            <div class="col-xs-3">
+                                <i class="fa fa-users fa-5x"></i>
+                            </div>
+                            <div class="col-xs-9 text-right">
+                                <div class="huge"><?= $freelancerCount ?></div>
+                                <div><?= _n('Freelancer', 'Freelancers', $freelancerCount, 'cn') ?></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <a href="<?= site_url() ?>/tasks">
+                    <div class="panel panel-green">
+                        <div class="panel-heading">
+                            <div class="row">
+                                <div class="col-xs-3">
+                                    <i class="fa fa-tasks fa-5x"></i>
+                                </div>
+                                <div class="col-xs-9 text-right">
+                                    <div class="huge"><?= $taskCount ?></div>
+                                    <div><?= _n('Task', 'Tasks', $taskCount, 'cn') ?></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean();
     }
 
     function CreatePostType()
