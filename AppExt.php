@@ -149,8 +149,10 @@ class AppExt
                                                 'post_status' => 'publish',
                                                 'numberposts' => 0,
                                                 'meta_query' => array(
-                                                    'key' => 'freelancer',
-                                                    'value' => $freelancer->ID
+                                                    array(
+                                                        'key' => 'freelancer',
+                                                        'value' => $freelancer->ID
+                                                    )
                                                 )
                                             )));
                                             ?>
